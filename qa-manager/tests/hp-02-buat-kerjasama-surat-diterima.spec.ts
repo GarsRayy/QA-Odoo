@@ -1,6 +1,7 @@
 import { test, expect } from '@playwright/test';
 import path from 'path';
 import { generateTestData } from './fixtures/data-generator';
+import { saveState } from './utils/state-helper';
 
 /**
  * HP-02: Registrasi Dynamic Project
@@ -16,6 +17,7 @@ test('HP-02: Registrasi Dynamic Project', async ({ page }) => {
   await page.getByRole('option', { name: ' Kerjasama LPPM' }).click();
   await page.getByRole('button', { name: 'Baru' }).click();
   await page.getByRole('textbox', { name: 'Name...' }).fill(data.projectName);
+  saveState('lastTestData', data); // Simpan seluruh objek data (termasuk projectName, dll)
   await page.getByRole('textbox', { name: 'Perihal/Judul :' }).fill(data.subject);
   await page.getByRole('combobox', { name: 'Kontak Mitra:' }).click();
   await page.getByRole('combobox', { name: 'Kontak Mitra:' }).fill(data.partnerName);

@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import path from 'path';
 import { generateTestData } from './fixtures/data-generator';
 
 /**
@@ -29,6 +30,12 @@ test('HP-04: Penugasan Team', async ({ page }) => {
   await page.getByRole('option', { name: 'Cari lebih...' }).click();
   await page.getByRole('cell', { name: 'Nanindya', exact: true }).click();
   await page.getByRole('textbox', { name: 'Program Studi' }).fill(data.prodi);
+  
+  // Upload surat_dummy.pdf secara otomatis
+  const pdfPath = path.resolve(__dirname, 'fixtures', 'dummy-surat.pdf');
+  await page.getByRole('dialog').locator('input[type="file"]').setInputFiles(pdfPath);
+  await page.waitForTimeout(2000);
+
   await page.getByRole('button', { name: 'Simpan & Tutup' }).click();
   
   await page.getByRole('button', { name: 'Tugaskan Ketua Tim' }).click();

@@ -1,6 +1,6 @@
 "use client";
 
-import { exportPDF } from "@/lib/export-pdf";
+import { exportPDF, exportSingleRunPDF } from "@/lib/export-pdf";
 import { useState, useEffect } from "react";
 import { 
   CheckCircle2, 
@@ -28,6 +28,8 @@ export default function Dashboard() {
   const [testRuns, setTestRuns] = useState<any[]>([]);
   const [scenarioCount, setScenarioCount] = useState(0);
   const [selectedMedia, setSelectedMedia] = useState<{ type: 'image' | 'video', url: string } | null>(null);
+  const [selectedRole, setSelectedRole] = useState("Dekan");
+  const [isGeneratingGuide, setIsGeneratingGuide] = useState(false);
 
   const fetchData = async () => {
     // Fetch test runs
@@ -74,6 +76,27 @@ export default function Dashboard() {
       setTestOutput("❌ Failed to connect to test engine.");
     } finally {
       setIsRunning(false);
+    }
+  };
+
+  const generateUserGuide = async () => {
+    setIsGeneratingGuide(true);
+    setTestOutput(`📘 Generating User Guide for Role: ${selectedRole}...\n`);
+    try {
+      const res = await fetch("/api/tests/run", { 
+        method: "POST", 
+        body: JSON.stringify({ 
+          grep: selectedRole, 
+          docMode: true 
+        }) 
+      });
+      const data = await res.json();
+      setTestOutput(data.output || "Guide generated successfully.");
+      fetchData();
+    } catch (err) {
+      setTestOutput("❌ Failed to generate guide.");
+    } finally {
+      setIsGeneratingGuide(false);
     }
   };
 
@@ -141,8 +164,8 @@ export default function Dashboard() {
           
           <button 
             onClick={runTestSuite}
-            disabled={isRunning}
-            className={`px-10 py-5 rounded-[1.5rem] bg-red-700 text-white font-black text-sm shadow-2xl shadow-red-900/30 flex items-center gap-3 hover:translate-y-[-4px] transition-all active:scale-95 ${isRunning ? "opacity-50 cursor-not-allowed" : ""}`}
+            disabled={isRunning || isGeneratingGuide}
+            className={`px-10 py-5 rounded-[1.5rem] bg-red-700 text-white font-black text-sm shadow-2xl shadow-red-900/30 flex items-center gap-3 hover:translate-y-[-4px] transition-all active:scale-95 ${(isRunning || isGeneratingGuide) ? "opacity-50 cursor-not-allowed" : ""}`}
           >
             {isRunning ? (
               <>
@@ -155,6 +178,41 @@ export default function Dashboard() {
                 Launch Full Suite
               </>
             )}
+          </button>
+        </div>
+      </div>
+
+      {/* User Guide Factory Section */}
+      <div className="bg-gradient-to-r from-blue-900 to-indigo-950 p-8 rounded-[2.5rem] shadow-2xl border border-blue-800/30 text-white flex flex-col md:flex-row items-center justify-between gap-6">
+        <div className="flex items-center gap-6">
+          <div className="w-16 h-16 bg-white/10 rounded-2xl flex items-center justify-center backdrop-blur-md">
+            <FileText className="w-8 h-8 text-blue-300" />
+          </div>
+          <div className="space-y-1">
+            <h3 className="text-xl font-black italic tracking-tight">User Guide Factory</h3>
+            <p className="text-blue-200/60 text-xs font-medium">Generate step-by-step documentation for specific roles automatically.</p>
+          </div>
+        </div>
+        
+        <div className="flex items-center gap-4 w-full md:w-auto">
+          <select 
+            value={selectedRole}
+            onChange={(e) => setSelectedRole(e.target.value)}
+            className="flex-1 md:w-48 bg-white/5 border border-white/20 rounded-xl px-4 py-3 text-sm font-black focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all cursor-pointer"
+          >
+            <option value="Mitra" className="bg-indigo-950">Role: Mitra</option>
+            <option value="Fakultas" className="bg-indigo-950">Role: Fakultas</option>
+            <option value="Dekan" className="bg-indigo-950">Role: Dekan</option>
+            <option value="LPPM" className="bg-indigo-950">Role: LPPM</option>
+          </select>
+          
+          <button 
+            onClick={generateUserGuide}
+            disabled={isRunning || isGeneratingGuide}
+            className={`px-8 py-3 bg-blue-500 text-white rounded-xl font-black text-xs hover:bg-blue-400 transition-all shadow-lg flex items-center gap-2 ${(isRunning || isGeneratingGuide) ? "opacity-50 cursor-not-allowed" : ""}`}
+          >
+            {isGeneratingGuide ? <Clock className="w-4 h-4 animate-spin" /> : <Zap className="w-4 h-4" />}
+            Generate Guide
           </button>
         </div>
       </div>
@@ -236,9 +294,12 @@ export default function Dashboard() {
                       <div className="flex items-center gap-3 mt-2">
                         {run.screenshot_path && (
                           <button onClick={() => setSelectedMedia({ type: 'image', url: run.screenshot_path })} className="text-[9px] font-black uppercase text-red-400 hover:text-red-700 transition-colors flex items-center gap-1">
-                            <Camera className="w-3 h-3" /> View Proof
+                            <Camera className="w-3 h-3" /> Proof
                           </button>
                         )}
+                        <button onClick={() => exportSingleRunPDF(run.id)} className="text-[9px] font-black uppercase text-blue-500 hover:text-blue-700 transition-colors flex items-center gap-1">
+                          <FileText className="w-3 h-3" /> Report
+                        </button>
                         <span className="text-[9px] font-bold text-red-900/20 uppercase tracking-tighter">{run.test_case_id}</span>
                       </div>
                     </div>

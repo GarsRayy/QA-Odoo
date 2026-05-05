@@ -32,6 +32,11 @@ test('HP-05: Submission Proposal & RAB', async ({ page }) => {
   await page.waitForTimeout(3000);
   
   await page.getByRole('textbox', { name: 'Nilai RAB' }).fill('150000000');
+  
+  // Memilih Mata Uang IDR agar format muncul
+  await page.getByRole('combobox', { name: 'IDR IDR' }).click();
+  await page.getByRole('option', { name: 'IDR' }).click();
+  
   await page.getByRole('button', { name: 'Simpan & Tutup' }).click();
   
   await page.getByRole('button', { name: 'Ajukan Proposal dan RAB (FTI)' }).click();

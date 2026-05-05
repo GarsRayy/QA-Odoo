@@ -3,6 +3,7 @@ import { exec } from 'child_process';
 import { createClient } from '@supabase/supabase-js';
 import fs from 'fs';
 import path from 'path';
+import { uploadEvidence } from '@/lib/storage';
 
 // Initialize Supabase client
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
@@ -10,7 +11,7 @@ const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
 const supabase = createClient(supabaseUrl, supabaseKey);
 
 export async function POST(req: Request) {
-  const { grep } = await req.json().catch(() => ({}));
+  const { grep, docMode } = await req.json().catch(() => ({}));
   
   return new Promise((resolve) => {
     const projectRoot = process.cwd();
@@ -40,9 +41,13 @@ export async function POST(req: Request) {
     const command = grep ? `npx playwright test --grep "${grep}"` : `npx playwright test`;
     const resultsPath = path.join(resultsDir, 'results.json');
 
-    console.log(`Executing: ${command}`);
+    console.log(`Executing: ${command} [DOC_MODE: ${!!docMode}]`);
 
-    exec(command, { cwd: projectRoot, timeout: 900000 }, async (error, stdout, stderr) => {
+    exec(command, { 
+      cwd: projectRoot, 
+      timeout: 900000,
+      env: { ...process.env, DOC_MODE: docMode ? 'true' : 'false' } 
+    }, async (error, stdout, stderr) => {
       const output = stdout + "\n" + stderr;
       
       // Extract //NOTES and //To Do from the test file to help developers
@@ -76,7 +81,7 @@ export async function POST(req: Request) {
           const testRuns: any[] = [];
 
           // Recursive function to find all tests in nested suites
-          const findTestsRecursively = (suites: any[]) => {
+          const findTestsRecursively = async (suites: any[]) => {
             if (!suites) return;
             for (const suite of suites) {
               if (suite.specs) {
@@ -88,25 +93,32 @@ export async function POST(req: Request) {
                     let screenshotAttachment = lastResult.attachments?.find((a: any) => a.name === 'screenshot');
                     let videoAttachment = lastResult.attachments?.find((a: any) => a.name === 'video');
 
-                    const ts = Date.now();
-                    let screenshotPath = screenshotAttachment 
-                      ? `/api/media/${path.basename(screenshotAttachment.path)}?t=${ts}` 
-                      : null;
-                    let videoPath = videoAttachment 
-                      ? `/api/media/${path.basename(videoAttachment.path)}?t=${ts}` 
-                      : null;
+                    let screenshotPath = null;
+                    let videoPath = null;
+                    const batchId = `run-${Date.now()}`;
 
+                    // Upload Screenshot if exists
+                    if (screenshotAttachment && screenshotAttachment.path) {
+                      screenshotPath = await uploadEvidence(screenshotAttachment.path, batchId);
+                    }
+
+                    // Upload Video if exists
+                    if (videoAttachment && videoAttachment.path) {
+                      videoPath = await uploadEvidence(videoAttachment.path, batchId);
+                    }
+
+                    // Fallback scan if attachments are missing but files exist in dir
                     if (!screenshotPath || !videoPath) {
                       const specFile = suite.file?.replace('.spec.ts', '').replace('.test.ts', '') || '';
                       for (const dir of mediaFiles.dirs) {
                         if (specFile && dir.toLowerCase().includes(specFile.toLowerCase())) {
                           if (!videoPath) {
                             const vid = mediaFiles.videos.find(v => v.includes(dir));
-                            if (vid) videoPath = `/api/media/${path.basename(vid)}?t=${ts}`;
+                            if (vid) videoPath = await uploadEvidence(vid, batchId);
                           }
                           if (!screenshotPath) {
                             const ss = mediaFiles.screenshots.find(s => s.includes(dir));
-                            if (ss) screenshotPath = `/api/media/${path.basename(ss)}?t=${ts}`;
+                            if (ss) screenshotPath = await uploadEvidence(ss, batchId);
                           }
                         }
                       }
@@ -141,7 +153,7 @@ export async function POST(req: Request) {
             }
           }
 
-          findTestsRecursively(results.suites);
+          await findTestsRecursively(results.suites);
 
           // Bulk insert into Supabase with error checking
           if (testRuns.length > 0) {
