@@ -1,0 +1,68 @@
+# dependencies
+node_modules/
+.pnp
+.pnp.js
+
+# testing
+/qa-manager/playwright-report/
+/qa-manager/test-results/
+/qa-manager/tests-results/
+/qa-manager/blob-report/
+/qa-manager/playwright/.cache/
+
+# next.js
+/qa-manager/.next/
+/qa-manager/out/
+
+# production
+/qa-manager/build
+
+# misc
+.DS_Store
+*.pem
+
+# debug
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# local env files
+.env*.local
+.env
+.env.development
+.env.test
+.env.production
+
+# typescript
+*.tsbuildinfo
+next-env.d.ts
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+ENV/
+env/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# OS
+Thumbs.db
+ehthumbs.db
+Desktop.ini

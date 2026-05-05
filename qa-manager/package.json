@@ -1,0 +1,39 @@
+{
+  "name": "qa-manager",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint",
+    "test": "playwright test",
+    "test:ui": "playwright test --ui",
+    "test:record": "playwright codegen https://edu-pusatpengabdianlppm.odoo.com",
+    "test:report": "playwright show-report"
+  },
+  "dependencies": {
+    "@supabase/auth-helpers-nextjs": "^0.10.0",
+    "@supabase/supabase-js": "^2.42.0",
+    "class-variance-authority": "^0.7.0",
+    "clsx": "^2.1.0",
+    "jspdf": "^4.2.1",
+    "jspdf-autotable": "^5.0.7",
+    "lucide-react": "^0.371.0",
+    "next": "14.2.1",
+    "react": "^18",
+    "react-dom": "^18",
+    "recharts": "^2.12.5",
+    "tailwind-merge": "^2.2.2"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.59.1",
+    "@types/node": "^20",
+    "@types/react": "^18",
+    "@types/react-dom": "^18",
+    "baseline-browser-mapping": "^2.10.24",
+    "postcss": "^8",
+    "tailwindcss": "^3.4.1",
+    "typescript": "^5"
+  }
+}
