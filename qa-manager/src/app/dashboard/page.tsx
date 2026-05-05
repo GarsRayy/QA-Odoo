@@ -21,18 +21,22 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { supabase } from "@/lib/supabase";
+import { INITIAL_SCENARIOS } from "@/constants/scenarios";
 
 export default function Dashboard() {
   const [isRunning, setIsRunning] = useState(false);
   const [testOutput, setTestOutput] = useState("");
   const [testRuns, setTestRuns] = useState<any[]>([]);
   const [scenarioCount, setScenarioCount] = useState(0);
+  const [totalExecutions, setTotalExecutions] = useState(0);
+  const [globalPassRate, setGlobalPassRate] = useState(0);
   const [selectedMedia, setSelectedMedia] = useState<{ type: 'image' | 'video', url: string } | null>(null);
-  const [selectedRole, setSelectedRole] = useState("Dekan");
+  const [selectedRole, setSelectedRole] = useState("Tendik");
   const [isGeneratingGuide, setIsGeneratingGuide] = useState(false);
+  const [currentTest, setCurrentTest] = useState<string | null>(null);
 
   const fetchData = async () => {
-    // Fetch test runs
+    // 1. Fetch recent test runs for the feed
     const { data: runs } = await supabase
       .from('test_runs')
       .select('*')
@@ -41,12 +45,30 @@ export default function Dashboard() {
     
     if (runs) setTestRuns(runs);
 
-    // Fetch scenarios count
-    const { count } = await supabase
+    // 2. Fetch total scenarios count
+    const { count: sCount } = await supabase
       .from('test_scenarios')
       .select('*', { count: 'exact', head: true });
     
-    if (count !== null) setScenarioCount(count);
+    // Fallback to initial scenarios length if DB is empty to show what's defined
+    setScenarioCount(sCount || INITIAL_SCENARIOS.length);
+
+    // 3. Fetch total executions count
+    const { count: eCount } = await supabase
+      .from('test_runs')
+      .select('*', { count: 'exact', head: true });
+    
+    if (eCount !== null) setTotalExecutions(eCount);
+
+    // 4. Calculate Global Pass Rate from ALL history
+    const { count: pCount } = await supabase
+      .from('test_runs')
+      .select('*', { count: 'exact', head: true })
+      .eq('status', 'passed');
+    
+    if (eCount && eCount > 0 && pCount !== null) {
+      setGlobalPassRate(Math.round((pCount / eCount) * 100));
+    }
   };
 
   useEffect(() => {
@@ -64,18 +86,66 @@ export default function Dashboard() {
     };
   }, []);
 
-  const runTestSuite = async () => {
+  const runTestSuite = async (grep?: string) => {
     setIsRunning(true);
-    setTestOutput("🚀 Initializing Engine...\n");
+    setTestOutput(`🚀 Initializing ${grep ? `scenario ${grep}` : 'full test suite'}...\n`);
+    setCurrentTest(grep || "FULL SUITE");
+    
     try {
-      const res = await fetch("/api/tests/run", { method: "POST" });
-      const data = await res.json();
-      setTestOutput(data.output || data.message || "No output received.");
-      fetchData(); 
-    } catch (err) {
-      setTestOutput("❌ Failed to connect to test engine.");
+      const response = await fetch('/api/tests/run', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ grep, docMode: false }),
+      });
+
+      if (!response.body) throw new Error('No response body');
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let done = false;
+
+      while (!done) {
+        const { value, done: readerDone } = await reader.read();
+        done = readerDone;
+        
+        if (value) {
+          const chunk = decoder.decode(value, { stream: true });
+          const lines = chunk.split('\n');
+          
+          lines.forEach(line => {
+            if (!line.trim()) return;
+            try {
+              const payload = JSON.parse(line);
+              if (payload.type === 'log' || payload.type === 'error') {
+                // Display Playwright logs
+                if (!payload.data.includes('📊') && !payload.data.includes('🧹')) {
+                  setTestOutput(prev => prev + payload.data + '\n');
+                }
+                
+                // Update current test indicator if found in log
+                const hpMatch = payload.data.match(/HP-\d+/i);
+                if (hpMatch) setCurrentTest(hpMatch[0].toUpperCase());
+
+                if (payload.data.includes('✅ Processed')) {
+                  fetchData();
+                }
+              }
+              if (payload.type === 'done') {
+                setTestOutput(prev => prev + `\n✨ Execution completed: ${payload.data.status}\n`);
+              }
+            } catch (e) {
+              // Raw logs
+              setTestOutput(prev => prev + line + '\n');
+            }
+          });
+        }
+      }
+    } catch (error: any) {
+      setTestOutput(prev => prev + `\n❌ RUNTIME ERROR: ${error.message}\n`);
     } finally {
       setIsRunning(false);
+      setCurrentTest(null);
+      fetchData();
     }
   };
 
@@ -100,15 +170,10 @@ export default function Dashboard() {
     }
   };
 
-  // Stats calculation
-  const totalTests = testRuns.length;
-  const passedTests = testRuns.filter(r => r.status === 'passed').length;
-  const passRate = totalTests > 0 ? Math.round((passedTests / totalTests) * 100) : 0;
-
   const stats = [
     { name: "Live Scenarios", value: scenarioCount.toString(), icon: FileText, color: "from-red-600 to-red-800", shadow: "shadow-red-500/20" },
-    { name: "Global Pass Rate", value: `${passRate}%`, icon: Trophy, color: "from-green-500 to-emerald-700", shadow: "shadow-green-500/20" },
-    { name: "Total Executions", value: totalTests.toString(), icon: Activity, color: "from-slate-800 to-black", shadow: "shadow-slate-500/20" },
+    { name: "Global Pass Rate", value: `${globalPassRate}%`, icon: Trophy, color: "from-green-500 to-emerald-700", shadow: "shadow-green-500/20" },
+    { name: "Total Executions", value: totalExecutions.toString(), icon: Activity, color: "from-slate-800 to-black", shadow: "shadow-slate-500/20" },
     { name: "Security Score", value: "98%", icon: ShieldAlert, color: "from-orange-500 to-red-600", shadow: "shadow-orange-500/20" },
   ];
 
@@ -163,7 +228,7 @@ export default function Dashboard() {
           </div>
           
           <button 
-            onClick={runTestSuite}
+            onClick={() => runTestSuite()}
             disabled={isRunning || isGeneratingGuide}
             className={`px-10 py-5 rounded-[1.5rem] bg-red-700 text-white font-black text-sm shadow-2xl shadow-red-900/30 flex items-center gap-3 hover:translate-y-[-4px] transition-all active:scale-95 ${(isRunning || isGeneratingGuide) ? "opacity-50 cursor-not-allowed" : ""}`}
           >
@@ -200,14 +265,14 @@ export default function Dashboard() {
             onChange={(e) => setSelectedRole(e.target.value)}
             className="flex-1 md:w-48 bg-white/5 border border-white/20 rounded-xl px-4 py-3 text-sm font-black focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all cursor-pointer"
           >
-            <option value="Mitra" className="bg-indigo-950">Role: Mitra</option>
-            <option value="Fakultas" className="bg-indigo-950">Role: Fakultas</option>
-            <option value="Dekan" className="bg-indigo-950">Role: Dekan</option>
-            <option value="LPPM" className="bg-indigo-950">Role: LPPM</option>
+            <option value="Tendik" className="bg-indigo-950">Role: Tendik LPPM</option>
+            <option value="Fakultas" className="bg-indigo-950">Role: Fakultas (FTI)</option>
+            <option value="Kepala" className="bg-indigo-950">Role: Kepala LPPM</option>
+            <option value="Pelaksana" className="bg-indigo-950">Role: Tim Pelaksana</option>
           </select>
           
           <button 
-            onClick={generateUserGuide}
+            onClick={() => generateUserGuide()}
             disabled={isRunning || isGeneratingGuide}
             className={`px-8 py-3 bg-blue-500 text-white rounded-xl font-black text-xs hover:bg-blue-400 transition-all shadow-lg flex items-center gap-2 ${(isRunning || isGeneratingGuide) ? "opacity-50 cursor-not-allowed" : ""}`}
           >
@@ -252,10 +317,18 @@ export default function Dashboard() {
           
           <div className="bg-red-950 rounded-[2.5rem] shadow-2xl overflow-hidden border-8 border-red-900/20 group">
             <div className="bg-red-900/40 px-8 py-4 flex items-center justify-between border-b border-white/5">
-              <div className="flex items-center gap-3">
-                <div className="w-3 h-3 rounded-full bg-red-500"></div>
-                <div className="w-3 h-3 rounded-full bg-orange-500 shadow-[0_0_10px_rgba(249,115,22,0.4)]"></div>
-                <div className="w-3 h-3 rounded-full bg-green-500"></div>
+              <div className="flex items-center gap-6">
+                <div className="flex items-center gap-3">
+                  <div className="w-3 h-3 rounded-full bg-red-500"></div>
+                  <div className="w-3 h-3 rounded-full bg-orange-500 shadow-[0_0_10px_rgba(249,115,22,0.4)]"></div>
+                  <div className="w-3 h-3 rounded-full bg-green-500"></div>
+                </div>
+                {currentTest && (
+                  <div className="flex items-center gap-3 px-4 py-1.5 bg-white/5 rounded-full border border-white/10 animate-in fade-in zoom-in duration-300">
+                    <span className="w-1.5 h-1.5 bg-red-500 rounded-full animate-pulse shadow-[0_0_8px_rgba(239,68,68,0.8)]"></span>
+                    <span className="text-[10px] font-black text-red-100 uppercase tracking-widest">Now Testing: {currentTest}</span>
+                  </div>
+                )}
               </div>
               <span className="font-mono text-[9px] font-bold text-white/30 uppercase tracking-widest">kernel@itera-qa-engine:~/logs</span>
             </div>
@@ -295,6 +368,11 @@ export default function Dashboard() {
                         {run.screenshot_path && (
                           <button onClick={() => setSelectedMedia({ type: 'image', url: run.screenshot_path })} className="text-[9px] font-black uppercase text-red-400 hover:text-red-700 transition-colors flex items-center gap-1">
                             <Camera className="w-3 h-3" /> Proof
+                          </button>
+                        )}
+                        {run.video_path && (
+                          <button onClick={() => setSelectedMedia({ type: 'video', url: run.video_path })} className="text-[9px] font-black uppercase text-emerald-500 hover:text-emerald-700 transition-colors flex items-center gap-1">
+                            <Play className="w-3 h-3" /> Play
                           </button>
                         )}
                         <button onClick={() => exportSingleRunPDF(run.id)} className="text-[9px] font-black uppercase text-blue-500 hover:text-blue-700 transition-colors flex items-center gap-1">

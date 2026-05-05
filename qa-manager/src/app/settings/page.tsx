@@ -9,7 +9,9 @@ import {
   Monitor, 
   Database,
   Save,
-  RefreshCw
+  RefreshCw,
+  Trash2,
+  ShieldAlert
 } from "lucide-react";
 
 export default function SystemSettings() {
@@ -24,6 +26,29 @@ export default function SystemSettings() {
     { name: "Display & Preferences", icon: Monitor },
     { name: "Database Maintenance", icon: Database },
   ];
+
+  const [isPurging, setIsPurging] = useState(false);
+
+  const handlePurgeData = async () => {
+    if (!confirm("CRITICAL: This will delete ALL test runs, logs, and bug reports. This action cannot be undone. Are you sure?")) {
+      return;
+    }
+
+    setIsPurging(true);
+    try {
+      const response = await fetch('/api/system/cleanup', { method: 'POST' });
+      const result = await response.json();
+      if (result.success) {
+        alert(result.message);
+      } else {
+        alert("Cleanup failed: " + result.error);
+      }
+    } catch (error) {
+      alert("Error connecting to cleanup API");
+    } finally {
+      setIsPurging(false);
+    }
+  };
 
   return (
     <div className="space-y-8 animate-in fade-in duration-700">
@@ -144,14 +169,55 @@ export default function SystemSettings() {
           )}
 
           {activeTab === "Database Maintenance" && (
-            <div className="bg-white/60 backdrop-blur-xl border border-white/40 rounded-[2.5rem] shadow-2xl shadow-red-900/5 p-10">
-              <h3 className="text-xl font-black text-red-950 mb-8">Database Status</h3>
-              <div className="p-6 rounded-2xl bg-green-50 border border-green-100 flex items-center justify-between">
-                <div>
-                  <p className="text-sm font-black text-green-900">Supabase Connection</p>
-                  <p className="text-xs text-green-700/60 font-medium">Operational • Latency: 42ms</p>
+            <div className="space-y-8">
+              <div className="bg-white/60 backdrop-blur-xl border border-white/40 rounded-[2.5rem] shadow-2xl shadow-red-900/5 p-10">
+                <h3 className="text-xl font-black text-red-950 mb-8">Database Status</h3>
+                <div className="p-6 rounded-2xl bg-green-50 border border-green-100 flex items-center justify-between">
+                  <div>
+                    <p className="text-sm font-black text-green-900">Supabase Connection</p>
+                    <p className="text-xs text-green-700/60 font-medium">Operational • Latency: 42ms</p>
+                  </div>
+                  <div className="w-3 h-3 bg-green-500 rounded-full animate-pulse"></div>
                 </div>
-                <div className="w-3 h-3 bg-green-500 rounded-full animate-pulse"></div>
+              </div>
+
+              {/* Danger Zone */}
+              <div className="bg-white rounded-[2.5rem] p-10 shadow-2xl border border-red-100/50 overflow-hidden relative group">
+                <div className="absolute top-0 right-0 w-32 h-32 bg-red-500/5 rounded-bl-[5rem] group-hover:scale-110 transition-transform"></div>
+                
+                <div className="flex items-center gap-4 mb-8">
+                  <div className="w-12 h-12 bg-red-100 rounded-2xl flex items-center justify-center text-red-600">
+                    <Trash2 className="w-6 h-6" />
+                  </div>
+                  <div>
+                    <h3 className="text-xl font-black text-red-950">Danger Zone</h3>
+                    <p className="text-xs text-red-900/40 font-bold uppercase tracking-widest mt-1">System Reset & Cleanup</p>
+                  </div>
+                </div>
+
+                <div className="p-6 bg-red-50 rounded-3xl border border-red-100 space-y-6">
+                  <div className="flex items-start gap-4">
+                    <div className="mt-1 p-2 bg-red-200 rounded-lg text-red-700">
+                      <ShieldAlert className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <h4 className="text-sm font-black text-red-950">Purge Execution History</h4>
+                      <p className="text-xs text-red-900/60 mt-1 leading-relaxed">
+                        Aksi ini akan menghapus semua data <b>Test Runs</b>, <b>Bugs</b>, dan <b>Logs</b> lama. 
+                        Data Skenario (HP-01, dll) tidak akan dihapus.
+                      </p>
+                    </div>
+                  </div>
+                  
+                  <button 
+                    onClick={handlePurgeData}
+                    disabled={isPurging}
+                    className="w-full py-4 bg-red-600 text-white rounded-2xl font-black text-sm shadow-xl shadow-red-900/20 hover:bg-red-700 transition-all active:scale-95 disabled:opacity-50 flex items-center justify-center gap-3"
+                  >
+                    {isPurging ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
+                    {isPurging ? "Cleaning Up..." : "Purge All Data Now"}
+                  </button>
+                </div>
               </div>
             </div>
           )}

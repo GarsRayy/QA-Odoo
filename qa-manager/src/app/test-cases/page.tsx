@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import React, { useState, useEffect } from "react";
 import { 
   Search, 
   Plus, 
@@ -20,15 +20,20 @@ import {
   Wand2,
   Layers,
   Target,
-  FileJson
+  FileJson,
+  RefreshCw,
+  Database
 } from "lucide-react";
+import { INITIAL_SCENARIOS } from "@/constants/scenarios";
 import { supabase } from "@/lib/supabase";
+
+const initialScenarios = INITIAL_SCENARIOS;
 
 export default function TestCases() {
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<string>("All");
   const [testResults, setTestResults] = useState<Record<string, any>>({});
-  const [scenarios, setScenarios] = useState<any[]>([]);
+  const [scenarios, setScenarios] = useState<any[]>(initialScenarios);
   const [isRunning, setIsRunning] = useState<string | null>(null);
   const [expandedCode, setExpandedCode] = useState<string | null>(null);
   const [confirmRun, setConfirmRun] = useState<any | null>(null);
@@ -47,6 +52,7 @@ export default function TestCases() {
   const [isSaving, setIsSaving] = useState(false);
   const [isLaunchingRecorder, setIsLaunchingRecorder] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
+  const [logs, setLogs] = useState("");
 
   const handleSeed = async () => {
     setIsLoading(true);
@@ -55,7 +61,7 @@ export default function TestCases() {
       const data = await res.json();
       if (data.success) {
         alert("✅ " + data.message);
-        fetchScenarios();
+        window.location.reload(); // Refresh to sync
       } else {
         alert("❌ Error: " + data.error);
       }
@@ -70,21 +76,31 @@ export default function TestCases() {
   const fetchScenarios = async () => {
     setIsLoading(true);
     try {
-      const { data, error } = await supabase
+      const { data: dbData, error } = await supabase
         .from('test_scenarios')
         .select('*')
         .order('code', { ascending: true });
       
       if (error) throw error;
       
-      if (data && data.length > 0) {
-        setScenarios(data);
-      } else {
-        setScenarios([]);
+      // Merge logic: Start with initialScenarios, then add/overwrite with DB data
+      const merged = [...initialScenarios];
+      
+      if (dbData && dbData.length > 0) {
+        dbData.forEach((dbItem: any) => {
+          const index = merged.findIndex(m => m.code === dbItem.code);
+          if (index !== -1) {
+            merged[index] = { ...merged[index], ...dbItem };
+          } else {
+            merged.push(dbItem);
+          }
+        });
       }
+      
+      setScenarios(merged);
     } catch (err) {
       console.error('Fetch Scenarios Error:', err);
-      setScenarios([]); // Fallback to empty to show the seed button
+      setScenarios(initialScenarios); // Fallback to hardcoded only
     } finally {
       setIsLoading(false);
     }
@@ -98,12 +114,34 @@ export default function TestCases() {
     
     if (data) {
       const latest: Record<string, any> = {};
-      data.forEach(run => {
+      data.forEach((run: any) => {
         if (!latest[run.test_case_id]) {
           latest[run.test_case_id] = run;
         }
       });
       setTestResults(latest);
+    }
+  };
+
+  // ── Import / Seed Scenarios ──────────────────────────────────────────────
+  const handleSeedScenarios = async () => {
+    if (!confirm("Import default scenarios (HP-01 to HP-14)? This will upsert existing ones.")) return;
+    
+    setIsLoading(true);
+    try {
+      const response = await fetch('/api/scenarios/seed');
+      const result = await response.json();
+      if (result.success) {
+        alert(result.message);
+        fetchScenarios();
+      } else {
+        alert("Failed to seed: " + result.error);
+      }
+    } catch (error) {
+      console.error(error);
+      alert("Error calling seed API");
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -127,16 +165,50 @@ export default function TestCases() {
   }, []);
 
   const runTest = async (code: string) => {
-    setConfirmRun(null);
     setIsRunning(code);
+    setLogs(`🚀 Initializing test for ${code}...\n`);
+    
     try {
-      await fetch("/api/tests/run", { 
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ grep: code })
+      const response = await fetch('/api/tests/run', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ grep: code, docMode: false }),
       });
-    } catch (err) {
-      console.error(err);
+
+      if (!response.body) throw new Error('No response body');
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let done = false;
+
+      while (!done) {
+        const { value, done: readerDone } = await reader.read();
+        done = readerDone;
+        
+        if (value) {
+          const chunk = decoder.decode(value, { stream: true });
+          const lines = chunk.split('\n');
+          
+          lines.forEach(line => {
+            if (!line.trim()) return;
+            try {
+              const payload = JSON.parse(line);
+              if (payload.type === 'log' || payload.type === 'error') {
+                setLogs(prev => prev + payload.data + '\n');
+              }
+              if (payload.type === 'done') {
+                setLogs(prev => prev + `\n✨ Test completed with status: ${payload.data.status}\n`);
+              }
+            } catch (e) {
+              setLogs(prev => prev + line + '\n');
+            }
+          });
+        }
+      }
+      fetchScenarios();
+      fetchLatestResults();
+    } catch (error: any) {
+      setLogs(prev => prev + `\n❌ ERROR: ${error.message}\n`);
     } finally {
       setIsRunning(null);
     }
@@ -545,64 +617,138 @@ export default function TestCases() {
                 const result = testResults[test.code];
                 const isExpanded = expandedCode === test.code;
                 return (
-                  <tr key={test.code} className="group hover:bg-red-50/20 transition-all cursor-pointer" onClick={() => setExpandedCode(isExpanded ? null : test.code)}>
-                    <td className="px-10 py-8">
-                      <div className="flex items-center gap-4">
-                        <div className={`w-12 h-12 rounded-2xl flex items-center justify-center font-black text-xs ${isExpanded ? "bg-red-700 text-white shadow-lg" : "bg-red-50 text-red-900/40"}`}>
-                          {test.code}
+                  <React.Fragment key={test.code}>
+                    {/* Main Row */}
+                    <tr 
+                      className={`hover:bg-red-50/30 transition-all cursor-pointer group ${isExpanded ? "bg-red-50/50" : ""}`} 
+                      onClick={() => setExpandedCode(isExpanded ? null : test.code)}
+                    >
+                      <td className="px-10 py-8">
+                        <div className="flex items-center gap-4">
+                          <div className={`w-12 h-12 rounded-2xl flex items-center justify-center font-black text-xs transition-all ${isExpanded ? "bg-red-700 text-white shadow-lg rotate-3" : "bg-red-50 text-red-900/40"}`}>
+                            {test.code}
+                          </div>
+                          {isExpanded ? <ChevronUp className="w-5 h-5 text-red-700" /> : <ChevronDown className="w-5 h-5 text-red-200 group-hover:text-red-400" />}
                         </div>
-                        {isExpanded ? <ChevronUp className="w-5 h-5 text-red-700" /> : <ChevronDown className="w-5 h-5 text-red-200 group-hover:text-red-400 transition-colors" />}
-                      </div>
-                    </td>
-                    <td className="px-10 py-8">
-                      <div className="space-y-1">
-                        <p className="text-base font-black text-red-950 group-hover:text-red-700 transition-colors">{test.name}</p>
-                        <p className="text-xs text-red-900/40 italic font-medium line-clamp-1">{test.description || 'No description provided.'}</p>
-                      </div>
-                    </td>
-                    <td className="px-10 py-8">
-                      <div className="flex flex-wrap gap-1.5 max-w-[200px]">
-                        {test.roles?.slice(0, 2).map((role: string) => (
-                          <span key={role} className="px-2.5 py-1 bg-white border border-red-50 text-red-700 rounded-lg text-[9px] font-black uppercase tracking-tighter shadow-sm">
-                            {role}
-                          </span>
-                        ))}
-                        {test.roles?.length > 2 && <span className="text-[9px] font-black text-red-900/20">+{test.roles.length - 2} more</span>}
-                        {(!test.roles || test.roles.length === 0) && <span className="text-[9px] font-black text-red-900/10 italic">N/A</span>}
-                      </div>
-                    </td>
-                    <td className="px-10 py-8">
-                      <div className="flex flex-col items-center justify-center gap-2">
-                        {isRunning === test.code ? (
-                          <div className="flex items-center gap-2 text-blue-600 font-black text-[10px] uppercase tracking-widest animate-pulse">
-                            <Clock className="w-4 h-4 animate-spin" /> Live...
+                      </td>
+                      <td className="px-10 py-8">
+                        <div className="space-y-1">
+                          <p className={`text-base font-black transition-colors ${isExpanded ? "text-red-700" : "text-red-950"}`}>{test.name}</p>
+                          <p className="text-xs text-red-900/40 italic font-medium line-clamp-1">{test.description}</p>
+                        </div>
+                      </td>
+                      <td className="px-10 py-8">
+                        <div className="flex flex-wrap gap-1.5">
+                          {test.roles?.slice(0, 2).map((role: string) => (
+                            <span key={role} className="px-2.5 py-1 bg-white border border-red-50 text-red-700 rounded-lg text-[9px] font-black uppercase tracking-tighter">
+                              {role}
+                            </span>
+                          ))}
+                        </div>
+                      </td>
+                      <td className="px-10 py-8 text-center">
+                        <div className="flex flex-col items-center justify-center">
+                          {isRunning === test.code ? (
+                            <div className="flex items-center gap-2 text-blue-600 font-black text-[10px] uppercase tracking-widest animate-pulse">
+                              <Clock className="w-4 h-4 animate-spin" /> Live...
+                            </div>
+                          ) : result ? (
+                            <div className={`inline-flex items-center gap-2 px-4 py-2 rounded-2xl text-[10px] font-black uppercase tracking-wider ${result.status === "passed" ? "bg-green-50 text-green-700 border border-green-100" : "bg-red-50 text-red-700 border border-red-100"}`}>
+                              {result.status === "passed" ? <CheckCircle2 className="w-3.5 h-3.5" /> : <XCircle className="w-3.5 h-3.5" />}
+                              {result.status}
+                            </div>
+                          ) : (
+                            <span className="text-[10px] font-black uppercase text-red-900/10">Pending</span>
+                          )}
+                        </div>
+                      </td>
+                      <td className="px-10 py-8 text-right" onClick={(e) => e.stopPropagation()}>
+                        <button 
+                          onClick={() => setConfirmRun(test)} 
+                          className="p-4 rounded-[1.25rem] bg-white border border-red-100 shadow-xl text-red-900 hover:bg-red-700 hover:text-white transition-all transform hover:scale-110"
+                        >
+                          <Play className="w-5 h-5 fill-current" />
+                        </button>
+                      </td>
+                    </tr>
+                    
+                    {/* Expanded Detail Panel Row */}
+                    {isExpanded && (
+                      <tr className="bg-red-50/30 border-b border-red-100 animate-in fade-in slide-in-from-top-4 duration-500">
+                        <td colSpan={5} className="px-10 py-12">
+                          <div className="grid grid-cols-1 lg:grid-cols-2 gap-12">
+                            {/* Steps Section */}
+                            <div className="space-y-6">
+                              <h4 className="text-[10px] font-black uppercase tracking-[0.3em] text-red-900/30 flex items-center gap-3">
+                                <div className="w-1.5 h-1.5 bg-red-700 rounded-full"></div>
+                                Technical Steps Pipeline
+                              </h4>
+                              <div className="space-y-3">
+                                {test.steps?.map((step: string, i: number) => (
+                                  <div key={i} className="flex items-start gap-4 group/step">
+                                    <div className="w-6 h-6 rounded-lg bg-white border border-red-100 text-red-700 flex items-center justify-center text-[10px] font-black shrink-0 group-hover/step:bg-red-700 group-hover/step:text-white transition-all">
+                                      {i + 1}
+                                    </div>
+                                    <p className="text-sm text-red-900/70 font-medium leading-relaxed pt-0.5">{step}</p>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+
+                            {/* Success Criteria Section */}
+                            <div className="space-y-6">
+                              <h4 className="text-[10px] font-black uppercase tracking-[0.3em] text-red-900/30 flex items-center gap-3">
+                                <div className="w-1.5 h-1.5 bg-green-500 rounded-full"></div>
+                                Success Criteria & Outcome
+                              </h4>
+                              <div className="p-8 bg-white/60 border border-white rounded-[2rem] shadow-xl shadow-red-900/5 relative overflow-hidden group/criteria">
+                                <div className="absolute top-0 right-0 w-24 h-24 bg-green-500/5 rounded-bl-[4rem] group-hover/criteria:scale-110 transition-transform"></div>
+                                <CheckCircle2 className="w-8 h-8 text-green-500 mb-4" />
+                                <p className="text-base font-bold text-green-900 leading-relaxed italic">
+                                  "{test.expected_result}"
+                                </p>
+                                <div className="mt-6 pt-6 border-t border-red-50 flex items-center justify-between">
+                                  <span className="text-[10px] font-black text-red-900/20 uppercase tracking-widest">Script Reference</span>
+                                  <code className="text-[10px] font-mono bg-red-50 text-red-700 px-3 py-1 rounded-lg border border-red-100">
+                                    {test.file_path}
+                                  </code>
+                                </div>
+                              </div>
+                            </div>
                           </div>
-                        ) : result ? (
-                          <div className={`inline-flex items-center gap-2 px-4 py-2 rounded-2xl text-[10px] font-black uppercase tracking-wider ${result.status === "passed" ? "bg-green-50 text-green-700 border border-green-100" : "bg-red-50 text-red-700 border border-red-100"}`}>
-                            {result.status === "passed" ? <CheckCircle2 className="w-3.5 h-3.5" /> : <XCircle className="w-3.5 h-3.5" />}
-                            {result.status}
-                          </div>
-                        ) : (
-                          <span className="text-[10px] font-black uppercase text-red-900/10 tracking-widest">Pending Run</span>
-                        )}
-                      </div>
-                    </td>
-                    <td className="px-10 py-8 text-right" onClick={(e) => e.stopPropagation()}>
-                      <button 
-                        onClick={() => setConfirmRun(test)} 
-                        disabled={!!isRunning} 
-                        className="p-4 rounded-[1.25rem] bg-white border border-red-100 shadow-xl shadow-red-900/5 text-red-900 hover:bg-red-700 hover:text-white transition-all transform hover:scale-110 active:scale-95 disabled:opacity-50"
-                      >
-                        <Play className="w-5 h-5 fill-current" />
-                      </button>
-                    </td>
-                  </tr>
+                        </td>
+                      </tr>
+                    )}
+                  </React.Fragment>
                 );
               })}
             </tbody>
           </table>
         </div>
       </div>
+
+      {/* Live Terminal Section */}
+      {isRunning && (
+        <div className="bg-slate-900 rounded-[3rem] shadow-3xl p-10 border border-white/5 animate-in slide-in-from-top-10 duration-500 overflow-hidden">
+          <div className="flex items-center justify-between mb-8">
+            <div className="flex items-center gap-4">
+              <div className="flex gap-2">
+                <div className="w-3 h-3 rounded-full bg-red-500/50"></div>
+                <div className="w-3 h-3 rounded-full bg-amber-500/50"></div>
+                <div className="w-3 h-3 rounded-full bg-emerald-500/50"></div>
+              </div>
+              <h3 className="text-white/40 font-black text-[10px] uppercase tracking-[0.3em]">Live Stream: {isRunning}</h3>
+            </div>
+            <div className="flex items-center gap-2">
+               <div className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse"></div>
+               <span className="text-emerald-500/50 text-[10px] font-black uppercase tracking-widest">Active Worker</span>
+            </div>
+          </div>
+          <div className="h-[300px] overflow-y-auto font-mono text-xs leading-relaxed text-emerald-400 custom-scrollbar">
+            <pre className="whitespace-pre-wrap">{logs}</pre>
+          </div>
+        </div>
+      )}
 
       {/* Execution Logs - Shared Component Style */}
       <div className="pt-12">

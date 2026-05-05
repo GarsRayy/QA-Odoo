@@ -5,7 +5,7 @@ import path from 'path';
  * NP-01: Negative Test Cases
  * Testing failure paths and validation.
  */
-test.describe('Negative Scenarios', () => {
+test.describe('NP-01: Negative Scenarios', () => {
 
   test('NP-01: Login Failure - Invalid Password', async ({ page }) => {
     await page.goto('https://edu-pusatpengabdianlppm.odoo.com/web/login');

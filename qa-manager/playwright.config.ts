@@ -1,4 +1,8 @@
 import { defineConfig, devices } from '@playwright/test';
+import dotenv from 'dotenv';
+import path from 'path';
+
+dotenv.config({ path: path.resolve(__dirname, '.env.local') });
 
 export default defineConfig({
   testDir: './tests',
@@ -10,7 +14,7 @@ export default defineConfig({
   workers: 1,
   reporter: [
     ['html'],
-    ['line'],
+    ['list'],
     ['json', { outputFile: 'test-results/results.json' }]
   ],
   use: {

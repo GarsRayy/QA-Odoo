@@ -29,11 +29,26 @@ for (const role of roles) {
     await page.fill('#login', role.user || '');
     await page.fill('#password', role.pass || '');
     
-    await page.click('button.btn-primary[type="submit"]');
+    // Press Enter to submit - often more reliable than clicking the button in Odoo
+    await page.keyboard.press('Enter');
     
-    // Verify redirected to dashboard
-    await expect(page).toHaveURL(/.*\/odoo|.*\/web/, { timeout: 15000 });
-    await expect(page.locator('body')).toHaveClass(/.*o_web_client.*/, { timeout: 15000 });
+    // Wait for the Odoo Main Navbar to appear - this is the definitive proof of successful login
+    // We increase timeout because Odoo dashboard can be heavy
+    try {
+      await page.waitForSelector('.o_main_navbar', { timeout: 30000 });
+      console.log(`✅ Dashboard detected for ${role.name}`);
+    } catch (e) {
+      // Fallback: check if we are still on login page
+      if (await page.locator('.alert-danger').isVisible()) {
+        const errorMsg = await page.locator('.alert-danger').innerText();
+        throw new Error(`Login failed for ${role.name}: ${errorMsg}`);
+      }
+      throw e;
+    }
+    
+    // Double check with body class
+    const body = page.locator('body');
+    await expect(body).toHaveClass(/.*o_web_client.*/, { timeout: 15000 });
     
     console.log(`✅ Login berhasil: ${role.name} — QA: Garis Rayya Rabbani`);
   });
